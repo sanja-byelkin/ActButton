@@ -5,7 +5,7 @@ On pressing button it:
 * switches its power on
 * connects to a Wifi
 * connects to a MQTT server
-* sends a message to a topic (voltage * 1000)
+* sends a message to a topic you setup (voltage * 1000)
 * switches itself off
 
 (above takes several seconds)
@@ -17,7 +17,7 @@ press button for long time (about 12 sec) it will create Wifi network for
 setup (then you can release button).
 
 Default wifi for setup is "ActButton" and password is "ab1234567890ab" (it
-can be changed in setup). When you connect to the setup Wifi all web
+can (and shoud!) be changed in setup). When you connect to the setup Wifi all web
 connections will redirected to the button setup web page.
 On the setup page there is http buttons:
 * OK - save parameters and shutdown
