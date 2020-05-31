@@ -31,7 +31,7 @@ bool get_field_ui16(void *vval, const String &str, uint8_t mlen);
 ADC_MODE(ADC_VCC);
 
 // a bit of debug facilities
-#define DEBUG_ON
+//#define DEBUG_ON
 #ifdef DEBUG_ON
 #define DEBUG_BEGIN do {Serial.begin(115200);Serial.setDebugOutput(true);} while(0);
 //#define DEBUG_BEGIN Serial.begin(921600);
