@@ -27,10 +27,10 @@ bool write_uint16_wrapper(File &f, void *vval, uint8_t mlen);
 bool get_field_str(void *vval, const String &str, uint8_t mlen);
 bool get_field_ui16(void *vval, const String &str, uint8_t mlen);
 
-
+// Use Analog-to-Digital converter for input voltage
 ADC_MODE(ADC_VCC);
 
-
+// a bit of debug facilities
 #define DEBUG_ON
 #ifdef DEBUG_ON
 #define DEBUG_BEGIN do {Serial.begin(115200);Serial.setDebugOutput(true);} while(0);
@@ -42,6 +42,10 @@ ADC_MODE(ADC_VCC);
 #define DEBUG_PRINTLN(x)
 #define DEBUG_PRINT(x)
 #endif //DEBUG_ON
+
+/**********************************************************************
+  Setup variables and constants
+**********************************************************************/
 
 const uint16_t WiFiSetupChannel= 1;
 const uint16_t DnsPort= 53;
@@ -61,9 +65,9 @@ char* mqtt_pswd= (char*)emptyStr;
 char* setup_ssid= (char*)emptyStr;
 char* setup_pssw= (char*)emptyStr;
 uint8_t wifi_channel= 0;
-uint8_t wifi_ap_mac[6]= {0,0,0,0,0,0};
+uint8_t wifi_ap_mac[6]= {0,0,0,0,0,0}; // mark it unset
 
-bool wifi_data_set()
+bool is_wifi_data_set()
 {
   for(uint8_t i= 0; i < 6; i++)
     if (wifi_ap_mac[i])
@@ -161,6 +165,10 @@ const VarDesc Parameters[]=
 
 const char setup_file[] PROGMEM= "/ActButton.cfg";
 
+/**********************************************************************
+  Global objects (an old Arduino tradition :) )
+**********************************************************************/
+
 WiFiClient espClient;
 PubSubClient mqtt(espClient);
 int lvl= HIGH;
@@ -172,6 +180,156 @@ DNSServer *DnsServer;
 void WifiSetMode(WiFiMode_t wifi_mode);
 void WifiManagerBegin();
 
+/**********************************************************************
+  Arduino setup
+**********************************************************************/
+
+void setup()
+{
+  int bat;
+  bool lwf_ok= false;
+  unsigned long strt= millis();
+
+  /* First suport power for this module */
+  pinMode(PwrCtrlPin, OUTPUT);
+  digitalWrite(PwrCtrlPin, LOW);
+
+  DEBUG_BEGIN;
+  DEBUG_PRINTLN("Start");
+
+  /* Blinking to sho that we are alive */
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, (lvl=!lvl));
+
+  /* Read Config */
+  if(!SPIFFS.begin())
+  {
+    DEBUG_PRINTLN("Format SPIFFS");
+    SPIFFS.format();
+    SPIFFS.begin();
+  }
+  lwf_ok= readCfg();
+  DEBUG_PRINT("Is read Config ok:");
+  DEBUG_PRINTLN(lwf_ok);
+  if (!lwf_ok)
+    goto setup;
+
+  /* Connect to Wifi */
+  WifiSetMode(WIFI_STA);
+  if (is_wifi_data_set())
+    WiFi.begin(ssid, password, wifi_channel, wifi_ap_mac, true );
+  else
+    WiFi.begin(ssid, password);
+  digitalWrite(LED_BUILTIN, (lvl=!lvl));
+
+
+  /* Read battery vltage */
+  bat= ESP.getVcc();
+  DEBUG_PRINT("Batterie:");
+  DEBUG_PRINTLN(ESP.getVcc());
+
+  /* Wait for WiFi to be connected */
+  counter= 1000;
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    if ((counter % 10) == 0)
+    {
+      digitalWrite(LED_BUILTIN, (lvl=!lvl));
+      DEBUG_PRINT(".");
+    }
+    delay(10);
+    if ((--counter)==0)
+      goto setup;
+  }
+  DEBUG_PRINTLN(" connected!");
+
+  /* if AP/channel we are conected to changed write config */
+  if(wifi_channel != WiFi.channel() ||
+     memcmp(wifi_ap_mac, WiFi.BSSID(), 6) != 0)
+  {
+    /* TODO: write only channel and AP MAC (if it has sens) */
+    wifi_channel= WiFi.channel();
+    memcpy(wifi_ap_mac, WiFi.BSSID(), 6);
+    writeCfg();
+  }
+  digitalWrite(LED_BUILTIN, (lvl=!lvl));
+
+  /* Connect to MQTT and sent the meaaege */
+  mqtt.setServer(mqtt_serv, (int)mqtt_port);
+  if (mqtt.connect(mqtt_devc, mqtt_user, mqtt_pswd))
+  {
+    char buff[20];
+    digitalWrite(LED_BUILTIN, (lvl=!lvl));
+    //itoa(millis() - strt, buff, 10);
+    itoa(bat, buff, 10);
+    mqtt.publish(mqtt_topc,buff);
+    digitalWrite(LED_BUILTIN, (lvl=!lvl));
+  }
+  digitalWrite(LED_BUILTIN, (lvl=!lvl));
+  /* disconnect from MQLL (to be sure that the message is sent) */
+  mqtt.disconnect();
+  DEBUG_PRINTLN("Mqtt Disconnect...");
+  digitalWrite(LED_BUILTIN, (lvl=!lvl));
+
+  /************
+    Power down
+  *************/
+  digitalWrite(PwrCtrlPin, HIGH);
+
+  /*
+    If user keep pressing button wait 10 Sec to be sure about his/her
+    intentions to enter setup
+  */
+  for(counter= 0; counter < 10; counter++)
+  {
+    digitalWrite(LED_BUILTIN, (lvl=!lvl));
+    delay(1000);
+  }
+
+setup:
+  /* Switch power support again to allow user use both hands during setup */
+  digitalWrite(PwrCtrlPin, LOW);
+  DEBUG_PRINTLN("SETUP!");
+
+  /* setup wifi AP */
+  WifiManagerBegin();
+  DEBUG_PRINT("AP IP address: ");
+  DEBUG_PRINTLN(WiFi.softAPIP());
+  digitalWrite(LED_BUILTIN, (lvl=!lvl));
+
+  /* setup Web server */
+  setup_server.on("/", handleRoot);
+  setup_server.onNotFound(handleNotFound);
+  setup_server.on("/sv",handleSave);
+  setup_server.on("/cn",handleShutdown);
+  setup_server.on("/rs",handleReset);
+  setup_server.begin();
+  counter= 0;
+  delay(100);
+  digitalWrite(LED_BUILTIN, (lvl=!lvl));
+}
+
+/**********************************************************************
+  Arduino loop
+**********************************************************************/
+
+void loop()
+{
+  // fast blinking to show we are in wetup mode
+  if (counter % 40 == 0)
+    digitalWrite(LED_BUILTIN, (lvl=!lvl));
+
+  // process requests
+  setup_server.handleClient();
+  if (DnsServer)
+    DnsServer->processNextRequest();
+  delay(10);
+  counter++;
+}
+
+/**********************************************************************
+  WEB interface
+**********************************************************************/
 
 static char* itoa(char *buff, uint8_t len, unsigned int val)
 {
@@ -190,6 +348,7 @@ static char* itoa(char *buff, uint8_t len, unsigned int val)
   return c;
 }
 
+// show field unsigned integer field on web
 void send_field_uint(const __FlashStringHelper *label,
                      const __FlashStringHelper *name,
                      void *vval, uint8_t mlen, bool hr)
@@ -200,6 +359,7 @@ void send_field_uint(const __FlashStringHelper *label,
   send_field_str(label, name, (void*)&c, mlen, hr);
 }
 
+// show field string field on web
 void send_field_str(const __FlashStringHelper *label,
                     const __FlashStringHelper *name,
                     void *vval, uint8_t mlen, bool hr)
@@ -229,6 +389,8 @@ void send_field_str(const __FlashStringHelper *label,
   setup_server.sendContent(content);
 }
 
+
+// show byte read only on web
 void send_field_8ui(const __FlashStringHelper *label,
                     const __FlashStringHelper *name,
                     void *vval, uint8_t mlen, bool hr)
@@ -246,6 +408,7 @@ void send_field_8ui(const __FlashStringHelper *label,
   setup_server.sendContent(content);
 }
 
+// show byte string in hex on web (read only)
 void send_field_hex(const __FlashStringHelper *label,
                     const __FlashStringHelper *name,
                     void *vval, uint8_t mlen, bool hr)
@@ -268,7 +431,7 @@ void send_field_hex(const __FlashStringHelper *label,
   setup_server.sendContent(content);
 }
 
-
+// root web page with setup
 void handleRoot()
 {
   DEBUG_PRINTLN("Root page of web");
@@ -294,7 +457,11 @@ void handleRoot()
   setup_server.chunkedResponseFinalize();
 }
 
+/*
+  Reads string send to web server.
 
+  Retund FALSE on success and TRUE on fail
+*/
 bool get_field_str(void *vval, const String &str, uint8_t mlen)
 {
   if (str.length() > mlen)
@@ -312,6 +479,11 @@ bool get_field_str(void *vval, const String &str, uint8_t mlen)
   return false; //success
 }
 
+/*
+  Reads uint16_t send to web server.
+
+  Retund FALSE on success and TRUE on fail
+*/
 bool get_field_ui16(void *vval, const String &str, uint8_t mlen)
 {
   if (str.length() > mlen)
@@ -321,9 +493,10 @@ bool get_field_ui16(void *vval, const String &str, uint8_t mlen)
   return false; //success
 }
 
-
+// take and save parameters from web
 void handleSave()
 {
+  // check all parameters
   bool ok= true;
   for (int i= 0; i < sizeof(Parameters)/sizeof(VarDesc); i++)
   {
@@ -342,6 +515,7 @@ void handleSave()
   }
   if (ok)
   {
+    // Parameters are OK, save and power off
     writeCfg();
     setup_server.send(200, "text/html",
                       F("<!DOCTYPE html><html><body><h3>"
@@ -351,9 +525,11 @@ void handleSave()
     digitalWrite(PwrCtrlPin, HIGH);
     return;
   }
+  // show setup page
   handleRoot();
 }
 
+// CANCEL button - just power off
 void handleShutdown()
 {
   setup_server.send(200, "text/html",
@@ -363,6 +539,8 @@ void handleShutdown()
   delay(500);
   digitalWrite(PwrCtrlPin, HIGH);
 }
+
+// RESET button, format FS and power off
 void handleReset()
 {
   SPIFFS.format();
@@ -373,155 +551,61 @@ void handleReset()
   delay(500);
   digitalWrite(PwrCtrlPin, HIGH);
 }
+
+// if page is not found - redirect on root page
 void handleNotFound(void)
 {
  setup_server.sendHeader("Location", "/",true);//Redirect to our html web page
  setup_server.send(302, "text/plane","");
 }
 
-void setup()
-{
-  int bat;
-  bool lwf_ok= false;
-  unsigned long strt= millis();
 
-  pinMode(PwrCtrlPin, OUTPUT);
-  digitalWrite(PwrCtrlPin, LOW); // First of all support power
+/**********************************************************************
+  WIFi management
+**********************************************************************/
 
-  DEBUG_BEGIN;
-  DEBUG_PRINTLN("Start");
+/*
+  Switches WiFi modes
 
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, (lvl=!lvl));
-
-  if(!SPIFFS.begin())
-  {
-    DEBUG_PRINTLN("Format SPIFFS");
-    SPIFFS.format();
-    SPIFFS.begin();
-  }
-
-  lwf_ok= readCfg();
-  DEBUG_PRINT("Read wifi:");
-  DEBUG_PRINTLN(lwf_ok);
-  if (!lwf_ok)
-    goto setup;
-
-  WifiSetMode(WIFI_STA);
-  if (wifi_data_set())
-    WiFi.begin(ssid, password, wifi_channel, wifi_ap_mac, true );
-  else
-    WiFi.begin(ssid, password);
-  digitalWrite(LED_BUILTIN, (lvl=!lvl));
-
-
-  bat= ESP.getVcc();
-  DEBUG_PRINT("Batterie:");
-  DEBUG_PRINTLN(ESP.getVcc());
-
-  if(wifi_channel != WiFi.channel() ||
-     memcmp(wifi_ap_mac, WiFi.BSSID(), 6) != 0)
-  {
-    wifi_channel= WiFi.channel();
-    memcpy(wifi_ap_mac, WiFi.BSSID(), 6);
-    writeCfg();
-  }
-  digitalWrite(LED_BUILTIN, (lvl=!lvl));
-
-  counter= 1000;
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    if ((counter % 10) == 0)
-    {
-      digitalWrite(LED_BUILTIN, (lvl=!lvl));
-      DEBUG_PRINT(".");
-    }
-    delay(10);
-    if ((--counter)==0)
-      goto setup;
-  }
-  DEBUG_PRINTLN(" connected!");
-
-  mqtt.setServer(mqtt_serv, (int)mqtt_port);
-  if (mqtt.connect(mqtt_devc, mqtt_user, mqtt_pswd))
-  {
-    char buff[20];
-    digitalWrite(LED_BUILTIN, (lvl=!lvl));
-    //itoa(millis() - strt, buff, 10);
-    itoa(bat, buff, 10);
-    mqtt.publish(mqtt_topc,buff);
-    digitalWrite(LED_BUILTIN, (lvl=!lvl));
-  }
-  digitalWrite(LED_BUILTIN, (lvl=!lvl));
-  mqtt.loop();
-  delay(10);
-  mqtt.loop();
-  mqtt.disconnect();
-  DEBUG_PRINTLN("Mqtt Disconnect...");
-  digitalWrite(LED_BUILTIN, (lvl=!lvl));
-
-  digitalWrite(PwrCtrlPin, HIGH);
-
-  for(counter= 0; counter < 10; counter++)
-  {
-    digitalWrite(LED_BUILTIN, (lvl=!lvl));
-    delay(1000);
-  }
-
-setup:
-  digitalWrite(PwrCtrlPin, LOW); // keep this button ON again
-  DEBUG_PRINTLN("SETUP!");
-
-  WifiManagerBegin();
-  IPAddress myIP = WiFi.softAPIP();
-  DEBUG_PRINT("AP IP address: ");
-  DEBUG_PRINTLN(myIP);
-  setup_server.on("/", handleRoot);
-  setup_server.onNotFound(handleNotFound);
-  setup_server.on("/sv",handleSave);
-  setup_server.on("/cn",handleShutdown);
-  setup_server.on("/rs",handleReset);
-  setup_server.begin();
-  counter= 0;
-  delay(10000);
-}
-
-void loop() {
-  if (counter % 30 == 0)
-    digitalWrite(LED_BUILTIN, (lvl=!lvl));
-  setup_server.handleClient();
-  if (DnsServer)
-    DnsServer->processNextRequest();
-  delay(10);
-  counter++;
-}
-
-// Inspired by Tasmota project
+  Inspired by Tasmota project
+*/
 void WifiSetMode(WiFiMode_t wifi_mode)
 {
-  if (WiFi.getMode() == wifi_mode) { return; }
+  if (WiFi.getMode() == wifi_mode)
+    return;
 
-  if (wifi_mode != WIFI_OFF) {
+  if (wifi_mode != WIFI_OFF)
+  {
     WiFi.forceSleepWake(); // Make sure WiFi is really active.
     delay(100);
   }
 
   uint32_t retry = 2;
-  while (!WiFi.mode(wifi_mode) && retry--) {
+  while (!WiFi.mode(wifi_mode) && retry--)
+  {
     DEBUG_PRINTLN("Retry set Mode...");
     delay(100);
   }
+  digitalWrite(LED_BUILTIN, (lvl=!lvl));
 
-  if (wifi_mode == WIFI_OFF) {
+  if (wifi_mode == WIFI_OFF)
+  {
     delay(1000);
     WiFi.forceSleepBegin();
+    digitalWrite(LED_BUILTIN, (lvl=!lvl));
     delay(1);
-  } else {
+  }
+  else
+  {
     delay(30); // Must allow for some time to init.
   }
 }
 
-// Inspired by Tasmota project
+/*
+  Switch on setup AP
+
+  Inspired by Tasmota project
+*/
 void WifiManagerBegin()
 {
   WifiSetMode(WIFI_AP);
@@ -535,11 +619,16 @@ void WifiManagerBegin()
     WiFi.softAP(setup_ssid, setup_pssw, WiFiSetupChannel, 0, 1);
 
   delay(500); // Without delay I've seen the IP address blank
+  digitalWrite(LED_BUILTIN, (lvl=!lvl));
+
   /* Setup the DNS server redirecting all the domains to the apIP */
   DnsServer->setErrorReplyCode(DNSReplyCode::NoError);
   DnsServer->start(DnsPort, "*", WiFi.softAPIP());
 }
 
+/**********************************************************************
+  Configuration interface
+**********************************************************************/
 
 bool read_bytes_wrapper(File &f, void *vval, uint8_t mlen)
 {
@@ -554,6 +643,11 @@ bool read_uint16_wrapper(File &f, void *vval, uint8_t mlen)
   return read_cfg_uint16(f, *((uint16_t *)vval));
 }
 
+/*
+  Reads all confuguration
+
+  return TRUE on success and FALSE on fail
+*/
 bool readCfg()
 {
   DEBUG_PRINTLN("read_cfg");
@@ -577,6 +671,7 @@ bool readCfg()
     goto err;
   }
 
+  // Free setup strings
   for (int i= 0; i < sizeof(Parameters)/sizeof(VarDesc); i++)
   {
     if(Parameters[i].out_processor == &send_field_str)
@@ -587,6 +682,7 @@ bool readCfg()
       *((char **)Parameters[i].var)= 0;
     }
   }
+  // Read setup
   for (int i= 0; i < sizeof(Parameters)/sizeof(VarDesc); i++)
   {
     DEBUG_PRINT("Read cfg :");
@@ -599,6 +695,7 @@ bool readCfg()
   return true;
 
 err:
+  // Reading setup failed so we clean up variables
   DEBUG_PRINTLN("cfg read Error!!!");
   for (int i= 0; i < sizeof(Parameters)/sizeof(VarDesc); i++)
   {
@@ -628,6 +725,11 @@ bool write_uint16_wrapper(File &f, void *vval, uint8_t mlen)
   return write_cfg_uint16(f, *((uint16_t *)vval));
 }
 
+/*
+  Writes all confuguration
+
+  return TRUE on success and FALSE on fail
+*/
 bool writeCfg()
 {
   DEBUG_PRINTLN("opening setup_file");
@@ -644,7 +746,7 @@ bool writeCfg()
     DEBUG_PRINTLN("Can't write leader");
     goto err;
   }
-    
+
   for (int i= 0; i < sizeof(Parameters)/sizeof(VarDesc); i++)
   {
     DEBUG_PRINT("Write cfg :");
