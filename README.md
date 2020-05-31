@@ -34,46 +34,6 @@ On the setup page there is http buttons:
 
 # Circuit
 
-ESP8266 MQTT button connections (picture will be added later):
+Idea by Andreas Spiess ( https://www.youtube.com/channel/UCu7_D0o48KbfhpEohoP7YSQ )
 
-* ESP8266 (D1 mini) connected:
-  * Ground
-    * minus of LiFePo4 battery
-    * minus of 1000 µF electrolitic capasitor
-  * 3.3v
-    * button (switch) 1
-    * ndp6020p MOSFET drain
-    * plus of 1000 µF electrolitic capasitor
-  * D0
-    * ndp6020p MOSFET gate
-* LiFePo4 battery
-  * minus
-    * ESP8266 ground
-  * plus
-    * button (switch) 2
-    * ndp6020p  MOSFET source
-    * 100K Om resistor 1
-* ndp6020p MOSFET
-  * gate
-    * ESP8266 D1
-    * 100K Om resistor 2
-  * Source
-    * LiFePo4 battery plus
-  * Drain
-    * ESP8266 3.3v
-* 100K Om resistor
-  * 1
-    * LiFePo4 battery plus
-  * 2
-    * ndp6020p MOSFET gate
-* button switch
-  * 1
-    * LiFePo4 battery plus
-  * 2
-    * ESP8266 3.3v
-* 1000 µF electrolitic capasitor
-  * minus
-    ESP8266 ground
-  * plus
-    ESP8266 3.3v
-    
+![ActButton Schematic](Schematic_ActButton.png)
