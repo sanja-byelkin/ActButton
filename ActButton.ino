@@ -300,9 +300,9 @@ setup:
   /* setup Web server */
   setup_server.on("/", handleRoot);
   setup_server.onNotFound(handleNotFound);
-  setup_server.on("/sv",handleSave);
-  setup_server.on("/cn",handleShutdown);
-  setup_server.on("/rs",handleReset);
+  setup_server.on("/sv", handleSave);
+  setup_server.on("/cn", handleShutdown);
+  setup_server.on("/rs", handleReset);
   setup_server.begin();
   counter= 0;
   delay(100);
