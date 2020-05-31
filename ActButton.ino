@@ -303,6 +303,7 @@ setup:
   setup_server.on("/sv", handleSave);
   setup_server.on("/cn", handleShutdown);
   setup_server.on("/rs", handleReset);
+  setup_server.on("/up", HTTP_POST, handleUpdate, handleUpdateProgress);
   setup_server.begin();
   counter= 0;
   delay(100);
@@ -440,7 +441,7 @@ void handleRoot()
     setup_server.send(505, F("text/html"), F("HTTP1.1 required"));
     return;
   }
-  setup_server.sendContent(F("<!DOCTYPE html><html><body><h3>Action button Setup</h3><form action=\"/sv\" method=\"post\">"));
+  setup_server.sendContent(F("<!DOCTYPE html><html><body><h3>Action button Setup</h3><form action=\"/sv\" method=\"POST\">"));
 
   uint8_t prev_group= 0;
   for (int i= 0; i < sizeof(Parameters)/sizeof(VarDesc); i++)
@@ -453,7 +454,12 @@ void handleRoot()
   }
   setup_server.sendContent(F("<hr><input type=\"submit\" value=\"OK\"></form><hr>"
                              "<form action=\"/cn\"><input type=\"submit\" value=\"CANCEL\"></form><hr>"
-                             "<form action=\"/rs\"><input type=\"submit\" value=\"RESET\"></form><hr></body></html>"));
+                             "<form action=\"/rs\"><input type=\"submit\" value=\"RESET\"></form><hr>"
+                             "<h3>Firmware update:</h3>"
+                             "<form action=\"/up\" method=\"POST\" enctype=\"multipart/form-data\">"
+                               "<input type=\"file\" name=\"update\"><br>"
+                               "<input type=\"submit\" value=\"UPDATE\"></form><hr>"
+                             "</body></html>"));
   setup_server.chunkedResponseFinalize();
 }
 
@@ -559,6 +565,60 @@ void handleNotFound(void)
  setup_server.send(302, "text/plane","");
 }
 
+
+// Over Air Update taken from WebUpdate example
+void handleUpdate(void)
+{
+  setup_server.sendHeader("Connection", "close");
+  setup_server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+  ESP.restart();
+}
+
+// Over Air Update taken from WebUpdate example
+void handleUpdateProgress(void)
+{
+  HTTPUpload& upload = setup_server.upload();
+  if (upload.status == UPLOAD_FILE_START)
+  {
+    WiFiUDP::stopAll();
+    DEBUG_PRINT("Update: ");
+    DEBUG_PRINTLN(upload.filename.c_str());
+    uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+    //start with max available size
+    if (!Update.begin(maxSketchSpace))
+    {
+#ifdef DEBUG_ON
+      Update.printError(Serial);
+#endif //DEBUG_ON
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_WRITE)
+  {
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize)
+    {
+#ifdef DEBUG_ON
+      Update.printError(Serial);
+#endif //DEBUG_ON
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_END)
+  {
+    //true to set the size to the current progress
+    if (Update.end(true))
+    {
+      DEBUG_PRINT("Update Success: ");
+      DEBUG_PRINTLN(upload.totalSize);
+      DEBUG_PRINTLN("Rebooting...");
+    }
+    else
+    {
+#ifdef DEBUG_ON
+      Update.printError(Serial);
+#endif //DEBUG_ON
+    }
+  }
+  yield();
+}
 
 /**********************************************************************
   WIFi management

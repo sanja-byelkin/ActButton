@@ -23,6 +23,7 @@ On the setup page there is http buttons:
 * OK - save parameters and shutdown
 * CANCEL - shutdown
 * RESET - remove setup (format data partition of the esp8266 flash) and shutdown
+* UPDATE - update software with given file and restart
 
 # Hardware
 
