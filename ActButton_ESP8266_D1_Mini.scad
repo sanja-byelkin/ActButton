@@ -2,7 +2,16 @@ $fn=50;
 WALL= 0.4*3;
 S_WALL= 0.2;
 TOLLERANCE= 0.03;
-BATT_D= 14.5 + TOLLERANCE*2;
+
+// no belt if 0
+BELT_THICKNESS= 0.7;
+BELT_W= 20;
+BELT_ANGLE= 45;
+
+VOLUME_2= "COMBO"; // "MIN", "MID", "MAX", "COMBO"
+
+
+BATT_D= 14.5 + TOLLERANCE*2 + BELT_THICKNESS*2;
 BATT_L= 50.5 + TOLLERANCE*2;
 CAPACITOR_D= 14.5 + TOLLERANCE*2;
 CAPACITOR_L= 22 + TOLLERANCE*2;
@@ -19,8 +28,10 @@ BUTTON_PLATFORM= 10;
 BUTTON_GAP= 4.2;
 BUTTON_PRESS= 4;
 BUTTON_OVERLAP= 0.4;
+BUTTON_WALL_GAP=4;
 
 LED_WINDOW= 12;
+
 
 
 BOX_W= max(5*WALL + BATT_D + CAPACITOR_D,
@@ -30,7 +41,7 @@ BOX_L= max(4*WALL + BATT_L,
            2*WALL + ESP_L);
 BOX_H= 4*WALL + max(BATT_D, CAPACITOR_D) + ESP_H;
 
-BUTTON_WINDOW_L= BUTTON_PLATFORM*3/2 - 0.4;
+BUTTON_WINDOW_L= (BUTTON_WALL_GAP*2 + BUTTON_PLATFORM -2*WALL);
 BUTTON_WINDOW_W= BOX_W-6*WALL;
 
 // cutting tool for cut_cube
@@ -192,12 +203,37 @@ module button_top_cut_box()
         // Cut for electronics
         translate([0, 0, -(BOX_H - battery_comp)/2 + BOX_H/2 + 0.01])
         cube([BOX_W - 4*WALL, BOX_L - 2*WALL, BOX_H -  battery_comp], center= true);
-        translate([+(CAPACITOR_D/2) - (BOX_W/2 - 2*WALL), 0, - (CAPACITOR_D/2 + BOX_H/2) + battery_comp + ESP_RH])
-        rotate([-90, 0, 0])
-        cylinder_cut(d= CAPACITOR_D, l= BOX_L - 2*WALL, h= CAPACITOR_D/2+ 0*20*WALL + 0.01);
+        translate([+(CAPACITOR_D/2) - (BOX_W/2 - 2*WALL), 0, - (CAPACITOR_D/2 + BOX_H/2) + (VOLUME_2 == "MIN" ? (battery_comp + ESP_RH) : (CAPACITOR_D + WALL))])
+        if (VOLUME_2 == "MIN" || VOLUME_2 == "MID")
+        {
+            rotate([-90, 0, 0])
+            cylinder_cut(d= CAPACITOR_D, l= BOX_L - 2*WALL, h= BOX_H);
+        }
+        else
+        {
+            //if there is belt, lets mame its cut even
+            cl= min(CAPACITOR_L, (BELT_THICKNESS > 0 ? (BOX_L - 2*WALL - BELT_W - 2*WALL)/2 : BOX_L));
+            l= BOX_L - 2*WALL - (VOLUME_2 == "MAX" ? 0: cl);
+            translate([ 0, (VOLUME_2 == "MAX" ? 0 : - -cl/2), BOX_H/2 - CAPACITOR_D/2])
+            difference()
+            {
+                cube([CAPACITOR_D, l, BOX_H], center=true);
+                translate([ CAPACITOR_D/4, 0, -BOX_H/2])
+                rotate([90,0,0])
+                linear_extrude(height= l, center=true)
+                polygon(points = [[0,0],[CAPACITOR_D/4, 0],[CAPACITOR_D/4,CAPACITOR_D/4]]);
+            }
+            if (VOLUME_2 != "MAX")
+            {
+                translate([0, -l/2 +WALL/2, (battery_comp + ESP_RH)
+                - (CAPACITOR_D + WALL)])
+                rotate([-90, 0, 0])
+                cylinder_cut(d= CAPACITOR_D, l= cl+ WALL, h= BOX_H);
+            }
+        }
         
     }
-    translate([0, BOX_H*2/3, -BOX_H/2 + BATT_D + 3*WALL])
+    translate([0, BOX_L/2- WALL - BUTTON_PLATFORM/2 -BUTTON_GAP, -BOX_H/2 + BATT_D + 3*WALL])
     button_66cage(platform= BUTTON_PLATFORM, gap=BUTTON_GAP);
 }
 
@@ -232,6 +268,15 @@ module button_box()
         cube([3*WALL, WALL, S_WALL], center=true);
         translate([-(BOX_W/2 - 2*WALL) + BATT_D/2, +BOX_L/4, -BOX_H/2 + S_WALL/2 -0.01])
         cube([WALL, 3*WALL, S_WALL], center=true);
+
+        if (BELT_THICKNESS > 0)
+        {
+            l= (2*WALL + CAPACITOR_D/2)/cos(BELT_ANGLE);
+            translate([0, 0, -BOX_H/2 + 3*WALL + BELT_THICKNESS/2])
+            rotate([0, BELT_ANGLE, 0])
+            translate([-l/2 + 2*WALL, 0, 0])
+            cube([l, BELT_W, BELT_THICKNESS], center=true);
+        }
     }
 }
 
@@ -266,17 +311,26 @@ module top_cover()
     h= WALL*2 - S_WALL;
     difference()
     {
-        slider_cover(h= WALL, w= BOX_W-4*WALL, l= BOX_L, top= true);
-        // window for the button press area
-        translate([0, BOX_H*2/3, WALL*2-h])
-        cube([BUTTON_WINDOW_W, BUTTON_WINDOW_L, h], center= true);
-        // window for the ESP8266 diode
-        translate([0, -BOX_H*2/3, WALL*2-h])
-        cube([LED_WINDOW, LED_WINDOW, h], center= true);
+        union()
+        {
+            difference()
+            {
+                slider_cover(h= WALL, w= BOX_W-4*WALL, l= BOX_L, top= true);
+                // window for the button press area
+                translate([0, BOX_L/2- WALL - BUTTON_PLATFORM/2 -BUTTON_GAP, WALL*2-h])
+                cube([BUTTON_WINDOW_W, BUTTON_WINDOW_L, h], center= true);
+                // window for the ESP8266 diode
+                translate([0, -BOX_H*2/3, WALL*2-h])
+                cube([LED_WINDOW, LED_WINDOW, h], center= true);
+            }
+            // cylinder which press the button
+            translate([0, BOX_L/2- WALL - BUTTON_PLATFORM/2 -BUTTON_GAP, -WALL])
+            cylinder(d= BUTTON_PRESS, h= WALL*2-        BUTTON_OVERLAP, center=false);
+        }
+        // press pointer
+        translate([0, BOX_L/2- WALL - BUTTON_PLATFORM/2 -BUTTON_GAP, -WALL])
+        cylinder(d1= min(BUTTON_PRESS- 2*S_WALL, (WALL*2 - BUTTON_OVERLAP - WALL)*2), d2=0, h= WALL*2 - BUTTON_OVERLAP - WALL, center=false);
     }
-    // cylinder which press the button
-    translate([0, BOX_H*2/3, -WALL])
-    cylinder(d= BUTTON_PRESS, h= WALL*2-BUTTON_OVERLAP, center=false);
 }
 
 button_box();
