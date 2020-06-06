@@ -329,7 +329,7 @@ module top_cover()
         }
         // press pointer
         translate([0, BOX_L/2- WALL - BUTTON_PLATFORM/2 -BUTTON_GAP, -WALL])
-        cylinder(d1= min(BUTTON_PRESS- 2*S_WALL, (WALL*2 - BUTTON_OVERLAP - WALL)*2), d2=0, h= WALL*2 - BUTTON_OVERLAP - WALL, center=false);
+        cylinder(d1= min(BUTTON_PRESS- 2*S_WALL, (WALL*2 - BUTTON_OVERLAP - S_WALL)*2), d2=0, h= WALL*2 - BUTTON_OVERLAP - WALL, center=false);
     }
 }
 
