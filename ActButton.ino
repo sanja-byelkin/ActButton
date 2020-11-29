@@ -522,6 +522,9 @@ void handleSave()
   if (ok)
   {
     // Parameters are OK, save and power off
+    // but first reset cached data
+    wifi_channel= 0;
+    wifi_ap_mac[0]= wifi_ap_mac[1]= wifi_ap_mac[2]= wifi_ap_mac[3]= wifi_ap_mac[4]= wifi_ap_mac[5]= 0;
     writeCfg();
     setup_server.send(200, "text/html",
                       F("<!DOCTYPE html><html><body><h3>"
@@ -549,7 +552,9 @@ void handleShutdown()
 // RESET button, format FS and power off
 void handleReset()
 {
+  DEBUG_PRINT("Firmaring memory... ");
   SPIFFS.format();
+  DEBUG_PRINTLN("Done.");
   setup_server.send(200, "text/html",
                     F("<!DOCTYPE html><html><body><h3>"
                       "Setings removed.Shutdown..."
